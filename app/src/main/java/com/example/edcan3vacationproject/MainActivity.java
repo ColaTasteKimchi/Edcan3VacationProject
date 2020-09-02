@@ -42,114 +42,72 @@ import static com.example.edcan3vacationproject.BR.msg;
 
 
 public class MainActivity extends AppCompatActivity {
-
-
-    private FirebaseFirestore firebaseFirestore = FirebaseFirestore.getInstance();
-    private FirebaseAuth firebaseAuth = FirebaseAuth.getInstance();
-
-    private ActivityMainBinding binding;
-    private String html = "";
-    private Handler mHandler;
-
     private Socket socket;
-
-    private BufferedReader networkReader;
-    private BufferedWriter networkWriter;
-
-    private String ip = " 127.0.0.1";
-    private int port = 20310;
+    private ActivityMainBinding binding;
     private ObservableArrayList<Message> items = new ObservableArrayList<>();
+    private FirebaseAuth firebaseAuth = FirebaseAuth.getInstance();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+
+        binding = DataBindingUtil.setContentView(this, R.layout.activity_main);
+        binding.setItems(items);
+        binding.imgSendBtn.setOnClickListener(view -> {
+            send(binding.getMessage1());
+            items.add(new Message(new ChatClient(
+                    UserCache.getUser(this).getId(),
+                    UserCache.getUser(this).getName(),
+                    UserCache.getUser(this).getEmail()), binding.getMessage1()));
+        });
+        setSupportActionBar(binding.toolbar);
+        if (getSupportActionBar() != null)
+            getSupportActionBar().setTitle("");
+
         GpsTracker gpsTracker = new GpsTracker(this);
+
+        int SDK_INT = android.os.Build.VERSION.SDK_INT;
+        if (SDK_INT > 8){
+            StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder().permitAll().build();
+            StrictMode.setThreadPolicy(policy);
+        }
+
+        ClientConnected clientConnected = new ClientConnected(new ChatClient(
+                UserCache.getUser(this).getId(),
+                UserCache.getUser(this).getName(),
+                UserCache.getUser(this).getEmail()), new GPSdata(gpsTracker.getLongitude(), gpsTracker.getLongitude()));
+        String ccdString = ObjectToJson(clientConnected);
+
+        Toast.makeText(getApplicationContext(), "Connecting to server...", Toast.LENGTH_SHORT).show();
+        AsyncConnect(ccdString, (string) -> {
+            Gson gson = new Gson();
+            Packet convertedObject = (Packet) new Gson().fromJson(string, Packet.class);
+            switch (convertedObject.PacketType) {
+                case Message:
+                    Message recieveMsg = (Message) new Gson().fromJson(string, Message.class);
+                    items.add(recieveMsg);
+                    break;
+            }
+        });
+
         TimerTask tt = new TimerTask() {
             public void run() {
                 GPSdata gpsdata = new GPSdata(gpsTracker.getLongitude(), gpsTracker.getLongitude());
                 GPS gps = new GPS(gpsdata);
-                String GPSlastdata = GpsToJson(gps);
+                String GPSlastdata = ObjectToJson(gps);
                 AsyncSend(GPSlastdata);
             }
         };
         Timer timer = new Timer();
         timer.schedule(tt, 0, 10000);
-        runOnUiThread(() -> {
-            super.onCreate(savedInstanceState);
-
-            int SDK_INT = android.os.Build.VERSION.SDK_INT;
-            if (SDK_INT > 8) {
-
-                StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder().permitAll().build();
-                StrictMode.setThreadPolicy(policy);
-            }
-
-            ClientConnected clientConnected = new ClientConnected(new ChatClient(
-                    UserCache.getUser(this).getId(),
-                    UserCache.getUser(this).getName(),
-                    UserCache.getUser(this).getEmail()), new GPSdata(gpsTracker.getLongitude(), gpsTracker.getLongitude()));
-            String ccdString = ObjectToJson(clientConnected);
-
-            AsyncConnect(ccdString, (string) -> {
-                Gson gson = new Gson();
-                Packet convertedObject = (Packet) new Gson().fromJson(string, Packet.class);
-                switch (convertedObject.PacketType) {
-                    case Message:
-                        Message recieveMsg = (Message) new Gson().fromJson(string, Message.class);
-                        items.add(recieveMsg);
-                        break;
-                }
-            });
-
-
-            binding = DataBindingUtil.setContentView(this, R.layout.activity_main);
-            binding.setItems(items);
-            binding.imgSendBtn.setOnClickListener(view -> {
-                if (binding.editText3.getText().toString() != null || !binding.editText3.getText().toString().equals(""))
-                    send(binding.getMessage1().toString());
-            });
-            setSupportActionBar(binding.toolbar);
-            getSupportActionBar().setTitle("");
-            runOnUiThread(() -> {
-                Message message = new Message();
-            });
-
-
-        });
-
-
     }
-
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        MenuInflater menuInflater = getMenuInflater();
-        menuInflater.inflate(R.menu.menu_main, menu);
-        return super.onCreateOptionsMenu(menu);
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
-        switch (item.getItemId()) {
-            case R.id.change_name:
-            case R.id.logout:
-                logout();
-                break;
-        }
-        return super.onOptionsItemSelected(item);
-    }
-
-    private void logout() {
-        UserCache.clear(this);
-        firebaseAuth.signOut();
-        startActivity(new Intent(this, LoginActivity.class));
-        finish();
-    }
-//
 
     @Override
     protected void onStop() {  //앱 종료시
         super.onStop();
         ClientDisConnect disConnect = new ClientDisConnect();
-        String data = DsctToJson(disConnect);
+        String data = ObjectToJson(disConnect);
         AsyncSend(data);
         AsyncDelay(3000,()-> {
             try {
@@ -161,18 +119,15 @@ public class MainActivity extends AppCompatActivity {
 
     }
 
-
     public void AsyncDelay(int initData, DelayFunc delayFunc) {
         DelayThread thread = new DelayThread(initData, delayFunc);
         thread.start();
     }
 
-
     public void AsyncConnect(String initData, RecivedDataFunc recivedDataFunc) {
         ConnectThread thread = new ConnectThread(initData, recivedDataFunc);
         thread.start();
     }
-
 
     public void AsyncListening(RecivedDataFunc recivedDataFunc) {
         ListenerThread thread = new ListenerThread(recivedDataFunc);
@@ -187,9 +142,7 @@ public class MainActivity extends AppCompatActivity {
     interface RecivedDataFunc {
         void OnRecivedData(String data);
     }
-    interface DelayFunc {
-        void OnDelayed();
-    }
+
     class ConnectThread extends Thread {
         RecivedDataFunc recivedDataFunc;
         String connectPacket;
@@ -217,6 +170,69 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     }
+
+    class ListenerThread extends Thread{
+        RecivedDataFunc Func;
+        byte[] data;
+
+        public ListenerThread(RecivedDataFunc recivedDataFunc) {
+            this.Func = recivedDataFunc;
+        }
+
+        public void run(){
+            try {
+                while (true) {
+                    InputStream input = socket.getInputStream();
+
+                    byte[] header = new byte[4];
+                    int recivedBytes = input.read(header);
+                    while (recivedBytes < 4){
+                        input.read(header);
+                    }
+                    ByteBuffer wrapped = ByteBuffer.wrap(header);
+                    int contentsize = wrapped.getInt();
+
+                    data = new byte[contentsize];
+                    int recivedContentBytes = 0;
+                    while (recivedContentBytes < contentsize) {
+                        recivedContentBytes += input.read(data);
+                    }
+                    runOnUiThread(() -> Func.OnRecivedData(new String(data, StandardCharsets.UTF_8)));
+                }
+            } catch(IOException e){
+                e.printStackTrace();
+            }
+        }
+    }
+
+    class DataThread extends Thread {
+        private String data;
+
+        public DataThread(String data){
+            this.data = data;
+        }
+
+        public void run() {
+            try {
+                byte[] contentBuffer = data.getBytes(StandardCharsets.UTF_8);
+                byte[] header = ByteBuffer.allocate(4).putInt(contentBuffer.length).array();
+                byte[] sendBuffer = new byte[header.length + contentBuffer.length];
+                System.arraycopy(header, 0, sendBuffer, 0, header.length);
+                System.arraycopy(contentBuffer, 0, sendBuffer, header.length, contentBuffer.length);
+                if (socket == null)
+                    return;
+                OutputStream output = socket.getOutputStream();
+                output.write(sendBuffer);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    interface DelayFunc {
+        void OnDelayed();
+    }
+
     class DelayThread extends Thread {
         DelayFunc delayFunc;
         int delay;
@@ -237,96 +253,43 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    class ListenerThread extends Thread {
-        RecivedDataFunc Func;
-        byte[] data;
-
-        public ListenerThread(RecivedDataFunc recivedDataFunc) {
-            this.Func = recivedDataFunc;
-        }
-
-        public String byteArrayToHex(byte[] a) {
-            StringBuilder sb = new StringBuilder();
-            for (final byte b : a)
-                sb.append(String.format("%02x ", b & 0xff));
-            return sb.toString();
-        }
-
-        public void run() {
-            try {
-                while (true) {
-                    InputStream input = socket.getInputStream();
-
-                    byte[] header = new byte[4];
-                    int recivedBytes = input.read(header);
-                    while (recivedBytes < 4) {
-                        input.read(header);
-                    }
-                    ByteBuffer wrapped = ByteBuffer.wrap(header);
-                    int contentsize = wrapped.getInt();
-
-                    data = new byte[contentsize];
-                    int recivedContentBytes = 0;
-                    while (recivedContentBytes < contentsize) {
-                        recivedContentBytes += input.read(data);
-                    }
-                    runOnUiThread(() -> Func.OnRecivedData(new String(data, StandardCharsets.UTF_8)));
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        MenuInflater menuInflater = getMenuInflater();
+        menuInflater.inflate(R.menu.menu_main, menu);
+        return super.onCreateOptionsMenu(menu);
     }
 
-    class DataThread extends Thread {
-        private String data;
-
-        public DataThread(String data) {
-            this.data = data;
+    @Override
+    public boolean onOptionsItemSelected(@NonNull MenuItem item) {
+        switch (item.getItemId()) {
+            case R.id.change_name:
+            case R.id.logout:
+                logout();
+                break;
         }
-
-        public void run() {
-            try {
-                byte[] contentBuffer = data.getBytes(StandardCharsets.UTF_8);
-                byte[] header = ByteBuffer.allocate(4).putInt(contentBuffer.length).array();
-                byte[] sendBuffer = new byte[header.length + contentBuffer.length];
-                System.arraycopy(header, 0, sendBuffer, 0, header.length);
-                System.arraycopy(contentBuffer, 0, sendBuffer, header.length, contentBuffer.length);
-                OutputStream output = socket.getOutputStream();
-                output.write(sendBuffer);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-    }
-    public static String DsctToJson(ClientDisConnect clientDisConnect) {
-        Gson msgGson = new Gson();
-        return msgGson.toJson(clientDisConnect);
+        return super.onOptionsItemSelected(item);
     }
 
-    public static String GpsToJson(GPS gps) {
-        Gson msgGson = new Gson();
-        return msgGson.toJson(gps);
+    private void logout() {
+        UserCache.clear(this);
+        firebaseAuth.signOut();
+        startActivity(new Intent(this, LoginActivity.class));
+        finish();
     }
 
-    public static String ObjectToJson(ClientConnected ccd) {
-        Gson msgGson = new Gson();
-        return msgGson.toJson(ccd);
-    }
-
-    public static String MsgToJson(Message msg) {
-        Gson msgGson = new Gson();
-        return msgGson.toJson(msg);
+    public <T> String ObjectToJson(T object) {
+        Gson json = new Gson();
+        return json.toJson(object);
     }
 
     public void send(String message1) {
-
         Message msg = new Message(new ChatClient(
                 UserCache.getUser(this).getId(),
                 UserCache.getUser(this).getName(),
                 UserCache.getUser(this).getEmail()),
                 message1);
-        String msgGson = MsgToJson(msg);
+        String msgGson = ObjectToJson(msg);
         AsyncSend(msgGson);
     }
 }
